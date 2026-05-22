@@ -1,8 +1,8 @@
-# Digital-Logic-Sim Community Edit
+# Digital-Logic-Sim Community Edit: Rocket Edition
 
-Our version of Sebastian Lague's Digital Logic Sim, which you can find on [itch.io](https://sebastian.itch.io/digital-logic-sim) and on [GitHub](https://github.com/SebLague/Digital-Logic-Sim).
+Modified version of the Digital Logic Sim Community Edit!
 
+- Original Community Edit [here](https://github.com/firecerne/Digital-Logic-Sim-Community-Edit)
+- Original Digital Logic Sim [here (github)](https://github.com/SebLague/Digital-Logic-Sim) and [here (itch.io)](https://sebastian.itch.io/digital-logic-sim)
 
-If you want to know what we are working on right now, check our [Task Management](https://nimble-pineapple-9b5.notion.site/2048ce5472ef8067a14cf50ecfb276e4?v=2048ce5472ef807e9872000c03ec9fe8).
-Feel free to open a pull request and contribute to it, we would love to add your features!
-This Community Edit is made so that you can have all the features that you love in one single repository or build.
+I made it as its own separate repository since it has some stuff that are subject to removal and change, and I'm not fully confident with what is made yet. I might contribute to the original DLS:CE when I think I have made enough! Other than that, I also have some stuff in here that are made for my own projects, so it seems a bit weird to add them to the Community Edition.
