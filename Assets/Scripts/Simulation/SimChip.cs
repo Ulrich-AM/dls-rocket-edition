@@ -1,0 +1,655 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DLS.Description;
+
+namespace DLS.Simulation
+{
+	public class SimChip
+	{
+		// Constant for when the chip caching shouldn't happen -- simply because we lack type to store bigger values.
+		// If a chip has a bigger pin than this, it will not be cached.
+		public const int MAX_PIN_WIDTH_WHEN_CACHING = 16;
+
+		// Constants, for when a chip should be cached. If a chip is purely combinational and has at most AUTO_CACHING number of input bits, it will always be cached.
+		// Otherwise, a user can specifie a chip to be cached, if the chip is combinational and has at most USER_CACHING number of input bits.
+		// If a chip has more than USER_CACHING input bits, it will never be cached. (This is, because memory requirements grow exponentially with number of input bits.)
+		public const int MAX_NUM_INPUT_BITS_WHEN_AUTO_CACHING = 12;
+		public const int MAX_NUM_INPUT_BITS_WHEN_USER_CACHING = 24;
+		public readonly ChipType ChipType;
+		public readonly int ID;
+		public readonly string Name;
+
+		// Some builtin chips, such as RAM, require an internal state for memory
+		// (can also be used for other arbitrary chip-specific data)
+		public readonly uint[] InternalState = Array.Empty<uint>();
+		public readonly bool IsBuiltin;
+		public SimPin[] InputPins = Array.Empty<SimPin>();
+		public int numConnectedInputs;
+		public readonly bool canBeCached; // True, if the chip can be cached. copied from ChipDescription
+		public bool shouldBeCached; // True, if the user specifically wanted this chip to be cached
+
+		public int numInputsReady;
+		public SimPin[] OutputPins = Array.Empty<SimPin>();
+		public SimChip[] SubChips = Array.Empty<SimChip>();
+		// Small, purely combinational chips use a LUT for fast calculations. These are stored here. Maps the name of a chip to its LUT.
+		public static readonly Dictionary<string, (int framCacheWasMade, uint[][] LUT)> combinationalChipCaches = new();
+		public uint[][] LUT = null;
+		// Variables for the creating cache info popup.
+		public static bool isCreatingACache = false;
+		public static string nameOfChipWhoseCacheIsBeingCreated;
+		public static float cacheCreatingProgress;
+		// If this is set to the current frame, all cache attempts will abort until the next frame.
+		public static int disabledCacheFrame = -1;
+
+		public SimChip()
+		{
+			ID = -1;
+		}
+
+		public SimChip(ChipDescription desc, int id, uint[] internalState, SimChip[] subChips)
+		{
+			SubChips = subChips;
+			ID = id;
+			Name = desc.Name;
+			ChipType = desc.ChipType;
+			canBeCached = desc.CanBeCached;
+			shouldBeCached = desc.ShouldBeCached;
+			IsBuiltin = ChipType != ChipType.Custom;
+
+			// ---- Create pins (don't allocate unnecessarily as very many sim chips maybe created!) ----
+			if (desc.InputPins.Length > 0)
+			{
+				InputPins = new SimPin [desc.InputPins.Length];
+				for (int i = 0; i < InputPins.Length; i++)
+				{
+					InputPins[i] = CreateSimPinFromDescription(desc.InputPins[i], true, this);
+				}
+			}
+
+			if (desc.OutputPins.Length > 0)
+			{
+				OutputPins = new SimPin [desc.OutputPins.Length];
+				for (int i = 0; i < OutputPins.Length; i++)
+				{
+					OutputPins[i] = CreateSimPinFromDescription(desc.OutputPins[i], false, this);
+				}
+			}
+
+			// ---- Initialize internal state ----
+			const int addressSize_8Bit = 256;
+
+			if (ChipType is ChipType.DisplayRGB  || ChipType is ChipType.DisplayRGBTouch)
+			{
+				// first 256 bits = display buffer, next 256 bits = back buffer, last bit = clock state (to allow edge-trigger behaviour)
+				InternalState = new uint[addressSize_8Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.DisplayRGB8x8)
+			{
+				const int addressSize_6Bit = 64;
+				// first 64 bits = display buffer, next 64 bits = back buffer, last bit = clock state (to allow edge-trigger behaviour)
+				InternalState = new uint[addressSize_6Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.DisplayRGB64x64_XY)
+			{
+				const int addressSize_12Bit = 4096;
+				// first 4096 bits = display buffer, next 4096 bits = back buffer, last bit = clock state (to allow edge-trigger behaviour)
+				InternalState = new uint[addressSize_12Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.DisplayRGB256x256_XY)
+			{
+				const int addressSize_16Bit = 65536;
+				// first 65536 bits = display buffer, next 65536 bits = back buffer, last bit = clock state (to allow edge-trigger behaviour)
+				InternalState = new uint[addressSize_16Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.DisplayRGB64x64_XY_8bit)
+			{
+				const int addressSize_12Bit = 4096;
+				InternalState = new uint[addressSize_12Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.DisplayRGB256x256_XY_8bit)
+			{
+				const int addressSize_16Bit = 65536;
+				InternalState = new uint[addressSize_16Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.DisplayDot)
+			{
+				// first 256 bits = display buffer, next 256 bits = back buffer, last bit = clock state (to allow edge-trigger behaviour)
+				InternalState = new uint[addressSize_8Bit * 2 + 1];
+			}
+			else if (ChipType is ChipType.CustomRom)
+			{
+				int addrBits = desc.InputPins[0].BitCount.BitCount;
+				InternalState = new uint[(int)Math.Pow(2, addrBits)];
+			}
+			else if (ChipType is ChipType.CustomDisplayRGB)
+			{
+				string name = desc.Name;
+				// Parse "DISPLAY WxH (BBIT)"
+				string[] parts = name.Split(' ');
+				string[] dims = parts[1].Split('x');
+				int width = int.Parse(dims[0]);
+				int height = int.Parse(dims[1]);
+				int addressSpace = width * height;
+
+				// first addressSpace bits = display buffer, next addressSpace bits = back buffer, 
+				// then 2 slots for width and height, then 1 slot for clock state
+				InternalState = new uint[addressSpace * 2 + 3];
+				InternalState[^3] = (uint)width;
+				InternalState[^2] = (uint)height;
+			}
+			else if (ChipType is ChipType.dev_Ram_8Bit)
+			{
+				InternalState = new uint[addressSize_8Bit + 1]; // +1 for clock state (to allow edge-trigger behaviour)
+
+				// Initialize memory contents to random state
+				Span<byte> randomBytes = stackalloc byte[4];
+				for (int i = 0; i < InternalState.Length - 1; i++)
+				{
+					Simulator.rng.NextBytes(randomBytes);
+					InternalState[i] = BitConverter.ToUInt32(randomBytes) & 0x00FF00FF; // Limit to 8 first bits, otherwise the value is too big
+				}
+			}
+
+			// Load in serialized persistent state (rom data, etc.)
+			else if (internalState is { Length: > 0 })
+			{
+				InternalState = new uint[internalState.Length];
+				UpdateInternalState(internalState);
+			}
+		}
+
+		public bool CanCache()
+		{
+			// We don't cache builtin chips.
+			if(ChipType != ChipType.Custom)
+				return false;
+			// Chips with more input pins than this constant only cache if the
+			// user requests that they do.
+			if(CalculateNumberOfInputBits() > MAX_NUM_INPUT_BITS_WHEN_AUTO_CACHING)
+				if(!shouldBeCached)
+					return false;
+			// Cached inputs and outputs are int32 types, and half the bits are
+			// used for the tri-state flag for each pin, therefore if any pin
+			// is wider than 16 bits, the cached results will be innacurate.
+			if(CalculateBiggestPinWidth() > MAX_PIN_WIDTH_WHEN_CACHING)
+				return false;
+			
+			return IsCombinational();
+		}
+
+		// Returns true, when this chip is purely combinational / stateless. This is the case, when the outputs of this chip depend entirely on the inputs and on nothing else.
+		public bool IsCombinational()
+		{
+			// For builtin chips, they are combinational if they are not a
+			// special input/output and don't have a state that can change
+			// while being run. This must be determined by whoever is
+			// implementing the builtin chip and hard coded.
+			if(ChipType != ChipType.Custom)
+				return canBeCached;
+
+			// Chip isn't combinational, if any of the subChips inputPins has more than one connection
+			foreach (SimChip subChip in SubChips)
+			{
+				foreach (SimPin inputPin in subChip.InputPins)
+				{
+					if (inputPin.numInputConnections > 1) return false;
+				}
+			}
+			
+			// Can only be combinational if all subchips are combinational
+			foreach (SimChip subChip in SubChips)
+			{
+				// recursively make sure, that subchip is combinational
+				if (!subChip.IsCombinational()) return false;
+			}
+
+			// Check for loops in wiring using topo sort
+			Dictionary<int, List<int>> graph = new();     // chipID -> list of dependent chipIDs
+			Dictionary<int, int> inDegree = new();        // chipID -> number of incoming edges
+			// Build Graph
+			foreach (SimChip chip in SubChips)
+			{
+				int chipID = chip.ID;
+				if (!graph.ContainsKey(chipID)) graph[chipID] = new List<int>();
+				if (!inDegree.ContainsKey(chipID)) inDegree[chipID] = 0;
+
+				foreach (SimPin output in chip.OutputPins)
+				{
+					foreach (SimPin target in output.ConnectedTargetPins)
+					{
+						SimChip targetChip = target.parentChip;
+						if (targetChip == null) continue;
+						// A subchip connects to itself, obviously creating a loop.
+						if(targetChip.ID == chipID)
+							return false;
+						// Add edge: chip -> targetChip
+						if (!graph[chipID].Contains(targetChip.ID))
+						{
+							graph[chipID].Add(targetChip.ID);
+
+							// Update in-degree for topological sort
+							if (!inDegree.ContainsKey(targetChip.ID)) inDegree[targetChip.ID] = 0;
+
+							inDegree[targetChip.ID]++;
+						}
+					}
+				}
+			}
+			// Run topo sort
+			Queue<int> zeroInDegree = new();
+			foreach (var kvp in inDegree)
+			{
+				if (kvp.Value == 0) zeroInDegree.Enqueue(kvp.Key);
+			}
+			int visitedCount = 0;
+			while (zeroInDegree.Count > 0)
+			{
+				int chipID = zeroInDegree.Dequeue();
+				visitedCount++;
+
+				if (!graph.ContainsKey(chipID)) continue;
+
+				foreach (int neighborID in graph[chipID])
+				{
+					inDegree[neighborID]--;
+					if (inDegree[neighborID] == 0) zeroInDegree.Enqueue(neighborID);
+				}
+			}
+
+			// If we couldn't visit all chips, a cycle exists
+			if (visitedCount != inDegree.Count) return false;
+
+			return true;
+		}
+
+		public int CalculateNumberOfInputBits()
+		{
+			int numberOfBits = 0;
+			foreach (SimPin pin in InputPins)
+			{
+				numberOfBits += (int)pin.State.size;
+			}
+			return numberOfBits;
+		}
+
+		public int CalculateBiggestPinWidth()
+		{
+			int biggestPinWidth = 0;
+			foreach(SimPin pin in InputPins.Concat(OutputPins))
+			{
+				if(pin.State.size > biggestPinWidth)
+				{
+					biggestPinWidth = pin.State.size;
+				}
+			}
+			return biggestPinWidth;
+		}
+    
+		public void ResetReceivedFlagsOnThisChipsPins()
+		{
+			foreach(SimPin pin in InputPins)
+			{
+				pin.numInputsReceivedThisFrame = 0;
+			}
+			foreach (SimPin pin in OutputPins)
+			{
+				pin.numInputsReceivedThisFrame = 0;
+			}
+		}
+
+		public void ResetReceivedFlagsOnChildrensPins()
+		{
+			foreach (SimChip subChip in SubChips)
+			{
+				subChip.ResetReceivedFlagsOnThisChipsPins();
+			}
+		}
+
+		public void ResetReceivedFlagsOnAllPins()
+		{
+			ResetReceivedFlagsOnThisChipsPins();
+			foreach (SimChip subChip in SubChips)
+			{
+				subChip.ResetReceivedFlagsOnAllPins();
+			}
+		}
+		
+		public static void AbortCache()
+		{
+			disabledCacheFrame = Simulator.simulationFrame;
+		}
+		// Returns true if it needed to fully recalculate the lookup table, which
+		// should indicate to parent chips that they need to recalculate theirs as well.
+		public int CalculateLUT()
+		{
+			bool ShouldAbort()
+			{
+				// Stop calculating this frame.
+				return disabledCacheFrame == Simulator.simulationFrame;
+			}
+
+			if(ShouldAbort())
+				return -1;
+
+			int newestChild = -1;
+			foreach (SimChip chip in SubChips)
+			{
+				newestChild = Math.Max(chip.CalculateLUT(), newestChild);
+			}
+			
+			if(combinationalChipCaches.ContainsKey(Name))
+			{
+				(int frameCacheWasMade, uint[][] LUT) = combinationalChipCaches[Name];
+				if(frameCacheWasMade >= newestChild)
+				{	
+					// LUT being null in the main dictionary means the chip
+					// could not be cached. LUT being null in this chip instance
+					// however means that caching hasn't been attempted, so
+					// instead an empty array indicates the chip could not be
+					// cached.
+					if(LUT == null)
+						this.LUT = Array.Empty<uint[]>();
+					else
+						this.LUT = LUT;
+					return frameCacheWasMade;
+				}
+			}
+			// Either we haven't been cached yet, or one of our descendants has
+			// since the last time we did, so we need to recache.
+			int currentFrame = Simulator.simulationFrame;
+			if(!CanCache())
+			{
+				LUT = Array.Empty<uint[]>();
+				combinationalChipCaches[Name] = (currentFrame, null);
+				return currentFrame;
+			}
+
+			if(ShouldAbort())
+			{
+				return -1;
+			}
+
+			nameOfChipWhoseCacheIsBeingCreated = Name;
+			cacheCreatingProgress = 0;
+			isCreatingACache = true;
+			// Buffer current Input
+			uint[] bufferedInput = new uint[InputPins.Length];
+			for (int i = 0; i < bufferedInput.Length; i++)
+			{
+				bufferedInput[i] = InputPins[i].State.GetShort();
+			}
+
+			try
+			{
+				// Cache this chip
+				int numberOfPossibleInputs = 1 << CalculateNumberOfInputBits();
+				uint[][] LUT = new uint[numberOfPossibleInputs][];
+				for (int input = 0; input < numberOfPossibleInputs; input++)
+				{
+					ResetReceivedFlagsOnThisChipsPins(); // Make sure the chip only recieves our new input
+					// Set all inputPins to their part of the input
+					int tempInput = input;
+					for (int i = 0; i < InputPins.Length; i++)
+					{
+						uint mask = ((uint)1 << InputPins[i].State.size) - 1;
+						InputPins[i].State.SetShort((uint)(tempInput & mask));
+						tempInput >>= (int)InputPins[i].State.size;
+					}
+					Simulator.StepChip(this); // Calculate Result
+
+					// Store output into cache
+					int numberOfOutputPins = OutputPins.Length;
+					uint[] outputs = new uint[numberOfOutputPins];
+					for (int i = 0; i < numberOfOutputPins; i++)
+					{
+						outputs[i] = OutputPins[i].State.GetShort();
+					}
+					LUT[input] = outputs;
+					cacheCreatingProgress = (float)input / numberOfPossibleInputs;
+					// Cancel the caching, if something ordered the caching to be stopped
+					if(ShouldAbort())
+						return -1;
+				}
+				combinationalChipCaches[Name] = (currentFrame, LUT);
+				this.LUT = LUT;
+				return currentFrame;
+			}finally
+			{
+				// Reload buffered Input
+				ResetReceivedFlagsOnAllPins(); // Make sure the chip only recieves our new input
+				for (int i = 0; i < bufferedInput.Length; i++)
+				{
+					InputPins[i].State.SetShort(bufferedInput[i]);
+				}
+				isCreatingACache = false;
+			}
+		}
+
+		public bool TryProcessingFromCache()
+		{
+			if(LUT == null)
+			{
+				CalculateLUT();
+				// Calculating the lookup table was aborted.
+				if(LUT == null)
+					return false;
+			}
+			// The chip couldn't be cached.
+			if(LUT.Length == 0)
+				return false;
+
+			int input = 0;
+			for (int i = InputPins.Length - 1; i >= 0; i--)
+			{
+				// Fails if at least one input is in TriState (as these are not cached)
+				if(InputPins[i].State.GetShort() >> 16 != 0)
+					return false;
+				input <<= (int)InputPins[i].State.size;
+				input |= (int)InputPins[i].State.GetShort();
+			}
+			uint[] outputs = LUT[input];
+			for (int i = 0; i < outputs.Length; i++)
+			{
+				OutputPins[i].State.SetShort(outputs[i]);
+			}
+			return true;
+		}
+
+		public void UpdateInternalState(uint[] source) => Array.Copy(source, InternalState, InternalState.Length);
+
+
+		public void Sim_PropagateInputs()
+		{
+			int length = InputPins.Length;
+
+			for (int i = 0; i < length; i++)
+			{
+				InputPins[i].PropagateSignal();
+			}
+		}
+
+		public void Sim_PropagateOutputs()
+		{
+			int length = OutputPins.Length;
+
+			for (int i = 0; i < length; i++)
+			{
+				OutputPins[i].PropagateSignal();
+			}
+
+			numInputsReady = 0; // Reset for next frame
+		}
+
+		public bool Sim_IsReady() => numInputsReady == numConnectedInputs;
+		
+		public (bool success, SimChip chip) TryGetSubChipFromID(int id)
+		{
+			// Todo: address possible errors if accessing from main thread while being modified on sim thread?
+			foreach (SimChip s in SubChips)
+			{
+				if (s?.ID == id)
+				{
+					return (true, s);
+				}
+			}
+
+			return (false, null);
+		}
+
+		public SimChip GetSubChipFromID(int id)
+		{
+			(bool success, SimChip chip) = TryGetSubChipFromID(id);
+			if (success) return chip;
+
+			throw new Exception("Failed to find subchip with id " + id);
+		}
+
+		public (SimPin pin, SimChip chip) GetSimPinFromAddressWithChip(PinAddress address)
+		{
+			foreach (SimChip s in SubChips)
+			{
+				if (s.ID == address.PinOwnerID)
+				{
+					foreach (SimPin pin in s.InputPins)
+					{
+						if (pin.ID == address.PinID) return (pin, s);
+					}
+
+					foreach (SimPin pin in s.OutputPins)
+					{
+						if (pin.ID == address.PinID) return (pin, s);
+					}
+				}
+			}
+
+			foreach (SimPin pin in InputPins)
+			{
+				if (pin.ID == address.PinOwnerID) return (pin, null);
+			}
+
+			foreach (SimPin pin in OutputPins)
+			{
+				if (pin.ID == address.PinOwnerID) return (pin, null);
+			}
+
+			throw new Exception("Failed to find pin with address: " + address.PinID + ", " + address.PinOwnerID);
+		}
+
+		public SimPin GetSimPinFromAddress(PinAddress address)
+		{
+			// Todo: address possible errors if accessing from main thread while being modified on sim thread?
+			foreach (SimChip s in SubChips)
+			{
+				if (s.ID == address.PinOwnerID)
+				{
+					foreach (SimPin pin in s.InputPins)
+					{
+						if (pin.ID == address.PinID) return pin;
+					}
+
+					foreach (SimPin pin in s.OutputPins)
+					{
+						if (pin.ID == address.PinID) return pin;
+					}
+				}
+			}
+
+			foreach (SimPin pin in InputPins)
+			{
+				if (pin.ID == address.PinOwnerID) return pin;
+			}
+
+			foreach (SimPin pin in OutputPins)
+			{
+				if (pin.ID == address.PinOwnerID) return pin;
+			}
+
+			throw new Exception("Failed to find pin with address: " + address.PinID + ", " + address.PinOwnerID);
+		}
+
+
+		public void RemoveSubChip(int id)
+		{
+			SubChips = SubChips.Where(s => s.ID != id).ToArray();
+		}
+
+
+		public void AddPin(SimPin pin, bool isInput)
+		{
+			if (isInput)
+			{
+				Array.Resize(ref InputPins, InputPins.Length + 1);
+				InputPins[^1] = pin;
+			}
+			else
+			{
+				Array.Resize(ref OutputPins, OutputPins.Length + 1);
+				OutputPins[^1] = pin;
+			}
+		}
+
+		static SimPin CreateSimPinFromDescription(PinDescription desc, bool isInput, SimChip parent) => new(desc.ID, isInput, parent, desc.BitCount);
+
+		public void RemovePin(int removePinID)
+		{
+			InputPins = InputPins.Where(p => p.ID != removePinID).ToArray();
+			OutputPins = OutputPins.Where(p => p.ID != removePinID).ToArray();
+		}
+
+		public void AddSubChip(SimChip subChip)
+		{
+			Array.Resize(ref SubChips, SubChips.Length + 1);
+			SubChips[^1] = subChip;
+		}
+
+		public void AddConnection(PinAddress sourcePinAddress, PinAddress targetPinAddress)
+		{
+			try
+			{
+				SimPin sourcePin = GetSimPinFromAddress(sourcePinAddress);
+				(SimPin targetPin, SimChip targetChip) = GetSimPinFromAddressWithChip(targetPinAddress);
+
+
+				Array.Resize(ref sourcePin.ConnectedTargetPins, sourcePin.ConnectedTargetPins.Length + 1);
+				sourcePin.ConnectedTargetPins[^1] = targetPin;
+				targetPin.numInputConnections++;
+				if (targetPin.numInputConnections == 1 && targetChip != null) targetChip.numConnectedInputs++;
+			}
+			catch (Exception)
+			{
+				// Can fail to find pin if player has edited an existing chip to remove the pin, and then a chip is opened which uses the old version of that modified chip.
+				// In that case we just ignore the failure and no connection is made.
+			}
+		}
+
+		public void RemoveConnection(PinAddress sourcePinAddress, PinAddress targetPinAddress)
+		{
+			SimPin sourcePin = GetSimPinFromAddress(sourcePinAddress);
+			(SimPin removeTargetPin, SimChip targetChip) = GetSimPinFromAddressWithChip(targetPinAddress);
+
+			// Remove first matching connection
+			for (int i = 0; i < sourcePin.ConnectedTargetPins.Length; i++)
+			{
+				if (sourcePin.ConnectedTargetPins[i] == removeTargetPin)
+				{
+					SimPin[] newArray = new SimPin[sourcePin.ConnectedTargetPins.Length - 1];
+					Array.Copy(sourcePin.ConnectedTargetPins, 0, newArray, 0, i);
+					Array.Copy(sourcePin.ConnectedTargetPins, i + 1, newArray, i, sourcePin.ConnectedTargetPins.Length - i - 1);
+					sourcePin.ConnectedTargetPins = newArray;
+
+					removeTargetPin.numInputConnections -= 1;
+					if (removeTargetPin.numInputConnections == 0)
+					{
+						removeTargetPin.State.SetAllDisconnected();
+						removeTargetPin.latestSourceID = -1;
+						removeTargetPin.latestSourceParentChipID = -1;
+						if (targetChip != null) removeTargetPin.parentChip.numConnectedInputs--;
+					}
+
+					break;
+				}
+			}
+		}
+	}
+}

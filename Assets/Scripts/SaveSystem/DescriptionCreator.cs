@@ -1,0 +1,266 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DLS.Description;
+using DLS.Game;
+using UnityEngine;
+using Random = System.Random;
+
+namespace DLS.SaveSystem
+{
+	public static class DescriptionCreator
+	{
+		public static ChipDescription CreateChipDescription(DevChipInstance chip)
+		{
+			// Get previously saved customizations such as name and colour (if exist)
+			ChipDescription descOld = chip.LastSavedDescription;
+			bool hasSavedDesc = descOld != null;
+			Vector2 size = hasSavedDesc ? descOld.Size : Vector2.zero;
+			Color col = hasSavedDesc ? descOld.Colour : RandomInitialChipColour();
+			string name = hasSavedDesc ? descOld.Name : string.Empty;
+			DisplayDescription[] displays = hasSavedDesc ? descOld.Displays : null;
+
+
+            // Create pin and subchip descriptions
+
+            PinDescription[] inputPins = new PinDescription[chip.GetInputPins().Length];
+            PinDescription[] outputPins = new PinDescription[chip.GetOutputPins().Count()];
+
+			// Restores custom layout customization position of pins. Useful on modification detection when exiting a chip.
+            if (hasSavedDesc)
+			{
+                if (chip.GetInputPins().Length != descOld.InputPins.Length || chip.GetOutputPins().Count() != descOld.OutputPins.Length)
+				{
+                    inputPins = OrderPins(chip.GetInputPins()).Select(CreatePinDescription).ToArray();
+                    outputPins = OrderPins(chip.GetOutputPins()).Select(CreatePinDescription).ToArray();
+                }
+
+				else
+				{
+					DevPinInstance[] inpins = OrderPins(chip.GetInputPins()).ToArray();
+                    DevPinInstance[] outpins = OrderPins(chip.GetOutputPins()).ToArray();
+
+					int[] inputOldIDs = descOld.InputPins.Select(input => input.ID).ToArray();
+                    int[] outputOldIDs = descOld.OutputPins.Select(output => output.ID).ToArray();
+
+                    for (int i = 0; i < inpins.Length; i++)
+					{
+						if (inputOldIDs.Contains(inpins[i].ID))
+						{
+                            inputPins[i] = CreatePinDescriptionAndConserveCustomInfo(inpins[i], descOld.InputPins.Where(p => p.ID.Equals(inpins[i].ID)).First());
+						}
+						else
+						{
+                            inputPins[i] = CreatePinDescription(inpins[i]);
+						}
+					}
+
+                    for (int i = 0; i < outpins.Length; i++)
+                    {
+                        if (outputOldIDs.Contains(outpins[i].ID))
+                        {
+                            outputPins[i] = CreatePinDescriptionAndConserveCustomInfo(outpins[i], descOld.OutputPins.Where(p => p.ID.Equals(outpins[i].ID)).First());
+                        }
+                        else
+                        {
+                            outputPins[i] = CreatePinDescription(outpins[i]);
+                        }
+                    }
+                }
+
+            }
+			else
+			{
+				inputPins = OrderPins(chip.GetInputPins()).Select(CreatePinDescription).ToArray();
+				outputPins = OrderPins(chip.GetOutputPins()).Select(CreatePinDescription).ToArray();
+			}
+			SubChipDescription[] subchips = chip.GetSubchips().Select(CreateSubChipDescription).ToArray();
+			Vector2 minChipsSize = SubChipInstance.CalculateMinChipSize(inputPins, outputPins, name);
+			size = Vector2.Max(minChipsSize, size);
+
+			UpdateWireIndicesForDescriptionCreation(chip);
+
+			// Create and return the chip description
+			return new ChipDescription
+			{
+				DLSVersion = Main.DLSVersion.ToString(),
+				Name = name,
+				NameLocation = hasSavedDesc ? descOld.NameLocation : NameDisplayLocation.Centre,
+				Size = size,
+				Colour = col,
+				ShouldBeCached = hasSavedDesc ? descOld.ShouldBeCached : false,
+
+				SubChips = subchips,
+				InputPins = inputPins,
+				OutputPins = outputPins,
+				Wires = chip.Wires.Select(CreateWireDescription).ToArray(),
+				Displays = displays,
+				ChipType = ChipType.Custom,
+				HasCustomLayout = hasSavedDesc ? descOld.HasCustomLayout : false
+			};
+		}
+
+		static IOrderedEnumerable<DevPinInstance> OrderPins(IEnumerable<DevPinInstance> pins)
+		{
+			return pins.OrderByDescending(p => p.Position.y).ThenBy(p => p.Position.x);
+		}
+
+
+		public static SubChipDescription CreateSubChipDescription(SubChipInstance subChip)
+		{
+			return new SubChipDescription
+			(
+				subChip.Description.Name,
+				subChip.ID,
+				subChip.Label,
+				subChip.Position,
+				// Don't save colour info for bus since it changes based on received input, so would just trigger unnecessary 'unsaved changes' warnings
+				subChip.IsBus ? null : subChip.OutputPins.Select(p => new OutputPinColourInfo(p.Colour, p.Address.PinID)).ToArray(),
+				(uint[])subChip.InternalData?.Clone()
+			);
+		}
+
+		public static SubChipDescription CreateBuiltinSubChipDescriptionForPlacement(ChipDescription chipDescription, int id, Vector2 position)
+		{
+			return new SubChipDescription
+			(
+				chipDescription.Name,
+				id,
+				string.Empty,
+				position,
+				Array.Empty<OutputPinColourInfo>(),
+				CreateDefaultInstanceData(chipDescription)
+			);
+		}
+
+		public static uint[] CreateDefaultInstanceData(ChipDescription desc)
+		{
+			ChipType type = desc.ChipType;
+			if (type == ChipType.CustomRom)
+			{
+				return new uint[(int)Math.Pow(2, desc.InputPins[0].BitCount.BitCount)];
+			}
+			if (type == ChipType.CustomDisplayRGB)
+			{
+				string name = desc.Name;
+				string[] parts = name.Split(' ');
+				string[] dims = parts[1].Split('x');
+				int width = int.Parse(dims[0]);
+				int height = int.Parse(dims[1]);
+				int addressSpace = width * height;
+				uint[] data = new uint[addressSpace * 2 + 3];
+				data[^3] = (uint)width;
+				data[^2] = (uint)height;
+				return data;
+			}
+			return CreateDefaultInstanceData(type);
+		}
+
+		public static uint[] CreateDefaultInstanceData(ChipType type)
+		{
+			return type switch
+			{
+				ChipType.Rom_256x16 => new uint[256], // ROM contents
+				ChipType.BankedRom => new uint[65536], // Banked ROM contents
+				ChipType.EEPROM_256x16 => new uint[257], // EEPROM contents + Rising-Edge detection
+				ChipType.Key => new uint[] { (uint)KeyCode.K }, // Key binding
+				ChipType.Pulse => new uint[] { 50, 0, 0 }, // Pulse width, ticks remaining, input state old
+				ChipType.DisplayLED => new uint[] { 0 }, // LED colour
+				ChipType.Button => new uint[] { 0 }, // Button colour
+				ChipType.Toggle => new uint[] { 0 }, // Toggle State 
+				ChipType.Constant_8Bit => new uint[] { 0 }, // Content
+				_ => ChipTypeHelper.IsBusType(type) ? new uint[2] : null
+			};
+		}
+
+		public static void UpdateWireIndicesForDescriptionCreation(DevChipInstance chip)
+		{
+			// Store wire's current index in wire for convenient access
+			for (int i = 0; i < chip.Wires.Count; i++)
+			{
+				chip.Wires[i].descriptionCreator_wireIndex = i;
+			}
+		}
+
+		// Note: assumed that all wire indices have been set prior to calling this function
+		public static WireDescription CreateWireDescription(WireInstance wire)
+		{
+			// Get wire points
+			Vector2[] wirePoints = new Vector2[wire.WirePointCount];
+			for (int i = 0; i < wirePoints.Length; i++)
+			{
+				// Don't need to save start/end points (just leave as zero) since they get their positions from the pins they're connected to (unless starting/ending at another wire).
+				// Benefit of leaving zero is that if a subchip is opened and modified (for example a pin is added, so pin spacing changes), then when opening this chip again, it won't
+				// immediately think it has unsaved changes (and unnecessarily notify the player), just because the start/end points of wires going to those modified pins has changed.
+				if (i == 0 && !wire.SourceConnectionInfo.IsConnectedAtWire) continue;
+				if (i == wirePoints.Length - 1 && !wire.TargetConnectionInfo.IsConnectedAtWire) continue;
+
+				wirePoints[i] = wire.GetWirePoint(i);
+			}
+
+			WireConnectionType connectionType = WireConnectionType.ToPins;
+
+			int connectedWireIndex = -1;
+			int connectedWireSegmentIndex = -1;
+
+			if (wire.ConnectedWire != null)
+			{
+				if (wire.SourceConnectionInfo.IsConnectedAtWire)
+				{
+					connectionType = WireConnectionType.ToWireSource;
+					connectedWireSegmentIndex = wire.SourceConnectionInfo.wireConnectionSegmentIndex;
+				}
+				else if (wire.TargetConnectionInfo.IsConnectedAtWire)
+				{
+					connectionType = WireConnectionType.ToWireTarget;
+					connectedWireSegmentIndex = wire.TargetConnectionInfo.wireConnectionSegmentIndex;
+				}
+
+				connectedWireIndex = wire.ConnectedWire.descriptionCreator_wireIndex;
+			}
+
+
+			return new WireDescription
+			{
+				SourcePinAddress = wire.SourcePin.Address,
+				TargetPinAddress = wire.TargetPin.Address,
+				ConnectionType = connectionType,
+				ConnectedWireIndex = connectedWireIndex,
+				ConnectedWireSegmentIndex = connectedWireSegmentIndex,
+				Points = wirePoints
+			};
+		}
+
+		public static PinDescription CreatePinDescription(DevPinInstance devPin) =>
+			new(
+				devPin.Pin.Name,
+				devPin.ID,
+				devPin.Position,
+				devPin.Pin.bitCount,
+				// Don't save colour info for output pin since it changes based on received input, so would just trigger unecessary 'unsaved changes' warnings
+				devPin.IsInputPin ? devPin.Pin.Colour : default,
+				devPin.pinValueDisplayMode
+			);
+
+		public static PinDescription CreatePinDescriptionAndConserveCustomInfo(DevPinInstance devPin, PinDescription pinDescription) =>
+			new(
+				devPin.Pin.Name,
+				devPin.ID,
+				devPin.Position,
+				devPin.Pin.bitCount,
+				devPin.IsInputPin ? devPin.Pin.Colour : default,
+				devPin.pinValueDisplayMode,
+				pinDescription.LocalOffset,
+				pinDescription.face
+			);
+
+		static Color RandomInitialChipColour()
+		{
+			Random rng = new();
+			float h = (float)rng.NextDouble();
+			float s = Mathf.Lerp(0.2f, 1, (float)rng.NextDouble());
+			float v = Mathf.Lerp(0.2f, 1, (float)rng.NextDouble());
+			return Color.HSVToRGB(h, s, v);
+		}
+	}
+}
