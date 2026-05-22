@@ -40,9 +40,9 @@ namespace DLS.Description
 		Out_Pin,
 
         Key,
+        ASCII,
 
-		Button,
-		Toggle,
+        Button,		Toggle,
 
 		Constant_8Bit,
 

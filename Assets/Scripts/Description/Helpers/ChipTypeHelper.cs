@@ -46,6 +46,7 @@ namespace DLS.Description
 
 			// ---- Inputs/Outputs ----
 			{ ChipType.Key, "KEY" },
+            { ChipType.ASCII, "ASCII" },
             { ChipType.Button, "BUTTON" },
 			{ ChipType.Toggle, "DIPSWITCH" },
 

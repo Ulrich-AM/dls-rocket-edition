@@ -8,6 +8,7 @@ using DLS.Game;
 using NUnit.Framework.Interfaces;
 using Random = System.Random;
 using System.Security.Cryptography;
+using UnityEngine;
 
 namespace DLS.Simulation
 {
@@ -333,6 +334,52 @@ namespace DLS.Simulation
 				{
 					bool isHeld = SimKeyboardHelper.KeyIsHeld(chip.InternalState[0]);
 					chip.OutputPins[0].State.SmallSet(isHeld ? Constants.LOGIC_HIGH : Constants.LOGIC_LOW);
+					break;
+				}
+				case ChipType.ASCII:
+				{
+					bool shift = chip.InputPins[0].State.SmallHigh();
+					bool ctrl = chip.InputPins[1].State.SmallHigh();
+					bool caps = chip.InputPins[2].State.SmallHigh();
+
+					uint ascii = 0;
+					foreach (KeyCode key in Seb.Helpers.InputHelper.ValidInputKeys)
+					{
+						if (SimKeyboardHelper.KeyIsHeld((uint)key))
+						{
+							// Map keys
+							if (key >= KeyCode.A && key <= KeyCode.Z)
+							{
+								ascii = (uint)('a' + (key - KeyCode.A));
+								if (caps ^ shift) ascii -= 32;
+							}
+							else if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9)
+							{
+								ascii = (uint)('0' + (key - KeyCode.Alpha0));
+								if (shift)
+								{
+									ascii = "!@#$%^&*()"[key - KeyCode.Alpha0];
+								}
+							}
+							else if (key == KeyCode.Space) ascii = 32;
+							else if (key == KeyCode.BackQuote) ascii = shift ? '~' : '`';
+							else if (key == KeyCode.Minus) ascii = shift ? '_' : '-';
+							else if (key == KeyCode.Equals) ascii = shift ? '+' : '=';
+							else if (key == KeyCode.LeftBracket) ascii = shift ? '{' : '[';
+							else if (key == KeyCode.RightBracket) ascii = shift ? '}' : ']';
+							else if (key == KeyCode.Backslash) ascii = shift ? '|' : '\\';
+							else if (key == KeyCode.Semicolon) ascii = shift ? ':' : ';';
+							else if (key == KeyCode.Quote) ascii = shift ? '"' : '\'';
+							else if (key == KeyCode.Comma) ascii = shift ? '<' : ',';
+							else if (key == KeyCode.Period) ascii = shift ? '>' : '.';
+							else if (key == KeyCode.Slash) ascii = shift ? '?' : '/';
+
+							if (ctrl && ascii >= 'a' && ascii <= 'z') ascii -= 96; // Ctrl+a..z
+							
+							chip.OutputPins[0].State.SetShort((ushort)ascii);
+							break;
+						}
+					}
 					break;
 				}
 				case ChipType.DisplayRGB:

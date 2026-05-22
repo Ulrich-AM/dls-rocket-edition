@@ -21,6 +21,7 @@ namespace DLS.Game
 			return new[]
 			{
 				CreateInputKeyChip(),
+				CreateASCIIChip(),
 				CreateInputButtonChip(),
 				CreateInputToggleChip(),
 				
@@ -436,6 +437,23 @@ namespace DLS.Game
 
 			return CreateBuiltinChipDescription(ChipType.Key, size, col, null, outputPins, null, NameDisplayLocation.Hidden, canBeCached: false);
 		}
+
+        static ChipDescription CreateASCIIChip()
+        {
+            Color col = GetColor(new(0.15f, 0.15f, 0.15f));
+            Vector2 size = new Vector2(GridSize * 8, GridSize * 6);
+
+            PinDescription[] inputPins = 
+            {
+                CreatePinDescription("SHIFT", 0),
+                CreatePinDescription("CTRL", 1),
+                CreatePinDescription("CAPS", 2)
+            };
+            
+            PinDescription[] outputPins = { CreatePinDescription("OUT", 3, PinBitCount.Bit8) };
+
+            return CreateBuiltinChipDescription(ChipType.ASCII, size, col, inputPins, outputPins, null, NameDisplayLocation.Centre, "", false);
+        }
 
         static ChipDescription CreateInputButtonChip()
         {
