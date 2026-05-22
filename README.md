@@ -17,11 +17,11 @@ stuff so far:
 stuff to add:
 
 - more stuff to tools panel:
--       translucent wires unless selected
--       clipboard for copy and paste
--       wire thickness
--       include wire nodes in selection
--       axis arrows for moving (advanced moving)
+- --- translucent wires unless selected
+- --- clipboard for copy and paste
+- --- wire thickness
+- --- include wire nodes in selection
+- --- axis arrows for moving (advanced moving)
 - custom RAM in special
 - custom display in special
 - clipboard and pasting
