@@ -34,6 +34,7 @@ namespace DLS.Description
 		public bool Prefs_ShowAngleIndicator;
 		public bool Prefs_ShowPerformanceOverlay;
 		public bool Prefs_SimPaused;
+		[JsonIgnore] public int Prefs_TranslucentWires;
 		public int Prefs_SimTargetStepsPerSecond;
 		public int Prefs_SimStepsPerClockTick;
 		public int Perfs_PinIndicators;

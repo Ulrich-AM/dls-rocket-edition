@@ -10,24 +10,25 @@ I made it as its own separate repository since it has some stuff that are subjec
 stuff so far:
 
 (1.2.2.a)
+
 - custom ROM creation
 - more RGB chips
 - tools panel in preferences
 - ascii chip
 
 (1.2.2.b)
+
 - custom RAM creation
+- more stuff in tools panel:
+- --- translucent wires unless selected
 
 stuff to add:
 
 - more stuff to tools panel:
-- --- translucent wires unless selected
 - --- clipboard for copy and paste
 - --- wire thickness
 - --- include wire nodes in selection
 - --- axis arrows for moving (advanced moving)
-- custom RAM in special
 - custom display in special
 - clipboard and pasting
-- idk
-
+- wireless chips

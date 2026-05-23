@@ -1282,6 +1282,23 @@ namespace DLS.Graphics
 
 			// Draw
 			Color col = wire.GetColour(0);
+            
+            bool translucent = false;
+            int mode = Project.ActiveProject.description.Prefs_TranslucentWires;
+            if (mode == 1) // Zero
+            {
+                uint state = wire.SourcePin.State.GetTristatedValue(0);
+                if (state != PinStateValue.LOGIC_HIGH) translucent = true;
+            }
+            else if (mode == 2 && !highlightWire) // Hover
+            {
+                translucent = true;
+            }
+
+            if (translucent)
+            {
+                col.a = 0.2f;
+            }
 			float interactSqrDst = WireDrawer.DrawWireStraight(wire.BitWires[0].Points, thickness, col, mousePos);
 
 			// Draw connection point (if connects to wire)
@@ -1310,12 +1327,30 @@ namespace DLS.Graphics
 
 			WireLayoutHelper.CreateMultiBitWireLayout(wire.BitWires, wire, WireThickness);
 
+			bool highlightWire = ShouldHighlightWire(wire);
 			int length = wire.BitWires.Length / (wire.bitCount <= 64 ? 1 : wire.bitCount <=512 ? 8 : 64);
 			// Draw
 			for (int bitIndex = 0; bitIndex < length; bitIndex++)
 			{
 				WireInstance.BitWire bitWire = wire.BitWires[bitIndex];
 				Color col = wire.GetColour(bitIndex);
+                
+                bool translucent = false;
+                int mode = Project.ActiveProject.description.Prefs_TranslucentWires;
+                if (mode == 1) // Zero
+                {
+                    uint state = wire.SourcePin.State.GetTristatedValue(bitIndex);
+                    if (state != PinStateValue.LOGIC_HIGH) translucent = true;
+                }
+                else if (mode == 2 && !highlightWire) // Hover
+                {
+                    translucent = true;
+                }
+
+                if (translucent)
+                {
+                    col.a = 0.2f;
+                }
 				float sqrInteractDst = WireDrawer.DrawWireStraight(bitWire.Points, thickness, col, mousePos);
 				if (canInteract && sqrInteractDst < sqrDstThreshold) InteractionState.NotifyElementUnderMouse(wire);
 			}

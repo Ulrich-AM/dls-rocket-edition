@@ -17,6 +17,7 @@ namespace DLS.Graphics
 		static readonly Vector2 entrySize = new(menuWidth, DrawSettings.SelectorWheelHeight);
 		static readonly UIHandle ID_AngleIndicator = new("TOOLS_AngleIndicator");
 		static readonly UIHandle ID_PerfOverlay = new("TOOLS_PerfOverlay");
+        static readonly UIHandle ID_TranslucentWires = new("TOOLS_TranslucentWires");
         static readonly UIHandle ID_ParallelWires = ParallelWireTool.ID_ParallelWires;
         static readonly UIHandle ID_ParallelWireSnapThresholdField = ParallelWireTool.ID_ParallelWireSnapThresholdField;
 		static ProjectDescription originalProjectDesc;
@@ -51,6 +52,12 @@ namespace DLS.Graphics
 				bool showPerf = MenuHelper.LabeledOptionsWheel("Show performance info", labelCol, labelPosCurr, entrySize, ID_PerfOverlay, new[] { "Off", "On" }, 16, true) == 1;
 				project.description.Prefs_ShowPerformanceOverlay = showPerf;
 				labelPosCurr.y -= entrySize.y + 0.5f;
+
+                // Translucent Wires
+                int translucentWiresMode = MenuHelper.LabeledOptionsWheel("Translucent wires", labelCol, labelPosCurr, entrySize, ID_TranslucentWires, new[] { "Off", "Zero", "Hover" }, 16, true);
+                project.description.Prefs_TranslucentWires = translucentWiresMode;
+                labelPosCurr.y -= entrySize.y + 0.5f;
+
 
                 // Parallel Wires
                 int parallelWiresMode = MenuHelper.LabeledOptionsWheel("Parallel wires", labelCol, labelPosCurr, entrySize, ID_ParallelWires, ParallelWireTool.ParallelWiresOptions, 16, true);
@@ -93,6 +100,7 @@ namespace DLS.Graphics
 			originalProjectDesc = Project.ActiveProject.description;
 			UI.GetWheelSelectorState(ID_AngleIndicator).index = originalProjectDesc.Prefs_ShowAngleIndicator ? 1 : 0;
 			UI.GetWheelSelectorState(ID_PerfOverlay).index = originalProjectDesc.Prefs_ShowPerformanceOverlay ? 1 : 0;
+            UI.GetWheelSelectorState(ID_TranslucentWires).index = originalProjectDesc.Prefs_TranslucentWires;
             UI.GetWheelSelectorState(ID_ParallelWires).index = Mathf.Clamp(originalProjectDesc.Prefs_ParallelWires, 0, ParallelWireTool.ParallelWiresOptions.Length - 1);
             UI.GetInputFieldState(ID_ParallelWireSnapThresholdField).SetText(originalProjectDesc.Prefs_ParallelWireSnapThreshold + "", false);
 		}
