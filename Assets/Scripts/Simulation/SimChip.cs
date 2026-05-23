@@ -138,6 +138,11 @@ namespace DLS.Simulation
 				InternalState[^3] = (uint)width;
 				InternalState[^2] = (uint)height;
 			}
+			else if (ChipType is ChipType.CustomRAM)
+			{
+				int addrBits = desc.InputPins[0].BitCount.BitCount;
+				InternalState = new uint[(int)Math.Pow(2, addrBits) + 1];
+			}
 			else if (ChipType is ChipType.dev_Ram_8Bit)
 			{
 				InternalState = new uint[addressSize_8Bit + 1]; // +1 for clock state (to allow edge-trigger behaviour)

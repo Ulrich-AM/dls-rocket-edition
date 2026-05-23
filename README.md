@@ -9,10 +9,14 @@ I made it as its own separate repository since it has some stuff that are subjec
 
 stuff so far:
 
+(1.2.2.a)
 - custom ROM creation
 - more RGB chips
 - tools panel in preferences
 - ascii chip
+
+(1.2.2.b)
+- custom RAM creation
 
 stuff to add:
 
@@ -26,3 +30,4 @@ stuff to add:
 - custom display in special
 - clipboard and pasting
 - idk
+

@@ -13,6 +13,7 @@ namespace DLS.Description
 
 		// ---- Memory ----
 		dev_Ram_8Bit,
+		CustomRAM,
 		Rom_256x16,
 		BankedRom,
 		EEPROM_256x16,

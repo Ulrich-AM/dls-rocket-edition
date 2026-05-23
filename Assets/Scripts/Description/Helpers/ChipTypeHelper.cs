@@ -19,6 +19,7 @@ namespace DLS.Description
 			{ ChipType.Detector, "DETECTOR" },
 			// ---- Memory ----
 			{ ChipType.dev_Ram_8Bit, "RAM-8" },
+			{ ChipType.CustomRAM, "CUSTOM RAM" },
 			{ ChipType.Rom_256x16, $"ROM 256{mulSymbol}16" },
 			{ ChipType.BankedRom, $"BANKED ROM" },
             { ChipType.EEPROM_256x16, $"EEPROM 256{mulSymbol}16" },

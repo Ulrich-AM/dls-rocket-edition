@@ -842,6 +842,40 @@ namespace DLS.Simulation
 
 					break;
 				}
+				case ChipType.CustomRAM:
+				{
+					uint addressPin = chip.InputPins[0].State.GetValue();
+					
+					// Detect clock rising edge
+					bool clockHigh = chip.InputPins[4].State.SmallHigh();
+					bool isRisingEdge = clockHigh && chip.InternalState[^1] == 0;
+					chip.InternalState[^1] = clockHigh ? 1u : 0;
+
+					// Write/Reset on rising edge
+					if (isRisingEdge)
+					{
+						if (chip.InputPins[3].State.SmallHigh()) // Reset
+						{
+							for (int i = 0; i < chip.InternalState.Length - 1; i++)
+							{
+								chip.InternalState[i] = 0;
+							}
+						}
+						else if (chip.InputPins[2].State.SmallHigh()) // Write
+						{
+							uint data = chip.InputPins[1].State.GetValue();
+							chip.InternalState[addressPin] = data;
+						}
+					}
+
+					// Output data at current address
+					if (addressPin < chip.InternalState.Length - 1)
+					{
+						chip.OutputPins[0].State.SetShort(chip.InternalState[addressPin]);
+					}
+
+					break;
+				}
 				case ChipType.Rom_256x16:
 				{
 					const uint mask = 0x00ff;

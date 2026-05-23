@@ -63,10 +63,22 @@ namespace DLS.Game
 			.Concat(CreateSplitMergePins(description.SplitMergePairs))
 			.Concat(CreateBusAndBusTerminus(description.pinBitCounts))
 			.Concat(CreateCustomRoms(description.CustomRomSizes))
+			.Concat(CreateCustomRams(description.CustomRamSizes))
 			.Concat(CreateCustomDisplays(description.CustomDisplays))
 			.ToArray();
 				
 			
+		}
+
+		static ChipDescription[] CreateCustomRams(List<KeyValuePair<int, int>> ramSizes)
+		{
+			if (ramSizes == null) return Array.Empty<ChipDescription>();
+			ChipDescription[] descriptions = new ChipDescription[ramSizes.Count];
+			for (int i = 0; i < ramSizes.Count; i++)
+			{
+				descriptions[i] = CreateCustomRAM(ramSizes[i].Key, ramSizes[i].Value);
+			}
+			return descriptions;
 		}
 
 		static ChipDescription[] CreateCustomDisplays(List<ProjectDescription.CustomDisplaySettings> displaySettings)
@@ -334,8 +346,27 @@ namespace DLS.Game
 			return CreateBuiltinChipDescription(ChipType.dev_Ram_8Bit, size, col, inputPins, outputPins, canBeCached: false);
 		}
 
-		static ChipDescription CreateROM_8()
+		public static ChipDescription CreateCustomRAM(int addrBits, int dataBits)
 		{
+		    Color col = GetColor(new(0.85f, 0.45f, 0.3f));
+
+		    PinDescription[] inputPins =
+		    {
+		        CreatePinDescription("ADDRESS", 0, (ushort)addrBits),
+		        CreatePinDescription("DATA", 1, (ushort)dataBits),
+		        CreatePinDescription("WRITE", 2),
+		        CreatePinDescription("RESET", 3),
+		        CreatePinDescription("CLOCK", 4)
+		    };
+		    PinDescription[] outputPins = { CreatePinDescription("OUT", 5, (ushort)dataBits) };
+
+		    string name = $"RAM {(long)Math.Pow(2, addrBits)}x{dataBits}";
+		    Vector2 size = new(GridSize * 10, SubChipInstance.MinChipHeightForPins(inputPins, outputPins));
+
+		    return CreateBuiltinChipDescription(ChipType.CustomRAM, size, col, inputPins, outputPins, canBeCached: false, name: name);
+		}
+
+		static ChipDescription CreateROM_8()		{
 			PinDescription[] inputPins =
 			{
 				CreatePinDescription("ADDRESS", 0, PinBitCount.Bit8)

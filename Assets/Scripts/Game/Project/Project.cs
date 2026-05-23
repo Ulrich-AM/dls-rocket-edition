@@ -845,6 +845,19 @@ namespace DLS.Game
 			}
 		}
 
+		public void AddNewRam(int addrBits, int dataBits)
+		{
+			if (description.CustomRamSizes == null) description.CustomRamSizes = new();
+			KeyValuePair<int, int> pair = new(addrBits, dataBits);
+			description.CustomRamSizes.Add(pair);
+			ChipDescription ramChip = BuiltinChipCreator.CreateCustomRAM(addrBits, dataBits);
+			chipLibrary.NotifyChipSaved(ramChip);
+			if (description.ChipCollections.Any(c => c.Name == "MEMORY"))
+			{
+				description.ChipCollections.First(c => c.Name == "MEMORY").Chips.Add(ramChip.Name);
+			}
+		}
+
 		public void AddNewCustomDisplay(int widthBits, int heightBits, int bitsPerChannel)
 		{
 		    if (description.CustomDisplays == null) description.CustomDisplays = new();

@@ -38,11 +38,13 @@ namespace DLS.Graphics
         {
             "Pins",
             "Merge/Split",
-            "ROM"
+            "ROM",
+            "RAM"
         };
         const int OPTION_PIN = 0;
         const int OPTION_MERGE_SPLIT = 1;
         const int OPTION_ROM = 2;
+        const int OPTION_RAM = 3;
 
 
         static readonly UIHandle ID_SpecialChipTypes = new("SPEC_SpecialChipTypes");
@@ -60,47 +62,80 @@ namespace DLS.Graphics
 
         static bool canAddChip;
         static int currentlyAddingPinBitOfSize;
+static KeyValuePair<int, int> currentlyAddingMergeSplit;
+static KeyValuePair<int, int> currentlyAddingRom;
+static KeyValuePair<int, int> currentlyAddingRam;
 
-        static KeyValuePair<int, int> currentlyAddingMergeSplit;
-        static KeyValuePair<int, int> currentlyAddingRom;
+public static List<KeyValuePair<int, int>> RomsAwaitingSave = new();
+public static List<string> RomsMade = new();
 
-        public static List<KeyValuePair<int, int>> RomsAwaitingSave = new();
-        public static List<string> RomsMade = new();
+public static List<KeyValuePair<int, int>> RamsAwaitingSave = new();
+public static List<string> RamsMade = new();
 
-        public static void DrawMenu()
+public static void DrawMenu()
+{
+    UI.DrawFullscreenPanel(ActiveUITheme.MenuBackgroundOverlayCol);
+
+    UIThemeDLS theme = ActiveUITheme;
+    InputFieldTheme inputTheme = ActiveUITheme.ChipNameInputField;
+    Draw.ID panelID = UI.ReservePanel();
+    
+    const float headerSpacing = 1.5f;
+    Vector2 topLeft = UI.Centre + new Vector2(-menuWidth / 2, verticalOffset);
+    Vector2 labelPosCurr = topLeft;
+    Color labelCol = Color.white;
+    Color headerCol = new(0.46f, 1, 0.54f);
+    Color errorCol = new(1, 0.4f, 0.45f);
+    Color doneCol = new(128, 128, 0);
+
+    using (UI.BeginBoundsScope(true))
+    {
+        DrawHeader("SPECIAL CHIPS:");
+        int mainPinNamesMode = DrawNextWheel("Special chip type:", SpecialChipTypes, ID_SpecialChipTypes);
+
+        if (mainPinNamesMode == OPTION_PIN)
         {
-            UI.DrawFullscreenPanel(ActiveUITheme.MenuBackgroundOverlayCol);
+            DrawSpecialPinMenu();
+        }
+        else if (mainPinNamesMode == OPTION_MERGE_SPLIT)
+        {
+            DrawSpecialMergeSplitMenu();
+        }
+        else if (mainPinNamesMode == OPTION_ROM)
+        {
+            DrawSpecialRomMenu();
+        }
+        else if (mainPinNamesMode == OPTION_RAM)
+        {
+            DrawSpecialRamMenu();
+            }
 
-            UIThemeDLS theme = ActiveUITheme;
-            InputFieldTheme inputTheme = ActiveUITheme.ChipNameInputField;
-            Draw.ID panelID = UI.ReservePanel();
-
-            const float headerSpacing = 1.5f;
-            Vector2 topLeft = UI.Centre + new Vector2(-menuWidth / 2, verticalOffset);
-            Vector2 labelPosCurr = topLeft;
-            Color labelCol = Color.white;
-            Color headerCol = new(0.46f, 1, 0.54f);
-            Color errorCol = new(1, 0.4f, 0.45f);
-            Color doneCol = new(128, 128, 0);
-
-
-            using (UI.BeginBoundsScope(true))
+            void DrawSpecialRamMenu()
             {
-                DrawHeader("SPECIAL CHIPS:");
-                int mainPinNamesMode = DrawNextWheel("Special chip type:", SpecialChipTypes, ID_SpecialChipTypes);
+            DrawHeader("NEW RAM CHIP:");
+            InputFieldState addrBitsInput = MenuHelper.LabeledInputField("Address bits:", labelCol, labelPosCurr, entrySize, ID_RomAddrBits, pinSizeInputValidator, settingFieldSize.x);
+            AddSpacing();
+            InputFieldState dataBitsInput = MenuHelper.LabeledInputField("Data bits:", labelCol, labelPosCurr, entrySize, ID_RomDataBits, pinSizeInputValidator, settingFieldSize.x);
+            int addrBitsAttempt = int.TryParse(addrBitsInput.text, out int a) ? a : -1;
+            int dataBitsAttempt = int.TryParse(dataBitsInput.text, out int b) ? b : -1;
+            (bool valid, string reason) confirmation = RealRamConfirmation(addrBitsAttempt, dataBitsAttempt);
 
-                if (mainPinNamesMode == OPTION_PIN)
-                {
-                    DrawSpecialPinMenu();
-                }
-                else if (mainPinNamesMode == OPTION_MERGE_SPLIT)
-                {
-                    DrawSpecialMergeSplitMenu();
-                }
-                else if (mainPinNamesMode == OPTION_ROM)
-                {
-                    DrawSpecialRomMenu();
-                }
+            if (addrBitsAttempt != -1 && dataBitsAttempt != -1 && !confirmation.valid && !displayDone)
+            {
+                AddSpacing();
+                DrawErrorSection(confirmation.reason);
+                canAddChip = false;
+            }
+            else if (addrBitsAttempt != -1 && dataBitsAttempt != -1 && confirmation.valid)
+            {
+                canAddChip = true;
+                currentlyAddingRam = new(addrBitsAttempt, dataBitsAttempt);
+                displayDone = DisplayDone(false);
+                return;
+            }
+            displayDone = DisplayDone(addrBitsAttempt == -1 && dataBitsAttempt == -1);
+            canAddChip = false;
+            }
 
                 AddSpacing();
                 DrawDoneSection(displayDone);
@@ -122,6 +157,11 @@ namespace DLS.Graphics
                 if(mainPinNamesMode == OPTION_ROM && canAddChip && addOrClose == 0)
                 {
                     AddNewRom(currentlyAddingRom.Key, currentlyAddingRom.Value);
+                    changeToBeAdded = false;
+                }
+                if(mainPinNamesMode == OPTION_RAM && canAddChip && addOrClose == 0)
+                {
+                    AddNewRam(currentlyAddingRam.Key, currentlyAddingRam.Value);
                     changeToBeAdded = false;
                 }
 
@@ -282,10 +322,12 @@ namespace DLS.Graphics
             PinBitCountsAwaitingSave = new();
             MergeSplitsAwaitingSave = new();
             RomsAwaitingSave = new();
+            RamsAwaitingSave = new();
 
             RefreshPinBitCounts();
             RefreshMergeSplits();
             RefreshRoms();
+            RefreshRams();
             saved = true;
             changeToBeAdded = true;
             displayDone = false;
@@ -410,6 +452,43 @@ namespace DLS.Graphics
             saved = false;
         }
 
+        public static void AddNewRam(int addrBits, int dataBits)
+        {
+            RamsAwaitingSave.Add(new(addrBits, dataBits));
+            RefreshRams();
+            saved = false;
+        }
+
+        public static void RefreshRams()
+        {
+            RamsMade = new();
+            if (Main.ActiveProject != null && Main.ActiveProject.description.CustomRamSizes != null)
+            {
+                foreach (var pair in Main.ActiveProject.description.CustomRamSizes)
+                {
+                    RamsMade.Add($"RAM {(long)Math.Pow(2, pair.Key)}x{pair.Value}");
+                }
+            }
+
+            foreach (var pair in RamsAwaitingSave)
+            {
+                RamsMade.Add($"RAM {(long)Math.Pow(2, pair.Key)}x{pair.Value}");
+            }
+        }
+
+        public static (bool valid, string reason) RealRamConfirmation(int addrBits, int dataBits)
+        {
+            if (addrBits < 1) return (false, "Address bits must be at least 1.");
+            if (addrBits > 16) return (false, "Address bits cannot exceed 16.");
+            if (dataBits < 1) return (false, "Data bits must be at least 1.");
+            if (dataBits > 32) return (false, "Data bits cannot exceed 32.");
+
+            string name = $"RAM {(long)Math.Pow(2, addrBits)}x{dataBits}";
+            if (RamsMade.Contains(name)) return (false, "This RAM already exists.");
+
+            return (true, "");
+        }
+
         public static bool DisplayDone(bool b)
         {
             return b;
@@ -431,10 +510,15 @@ namespace DLS.Graphics
                 {
                     Main.ActiveProject.AddNewRom(pair.Key, pair.Value);
                 }
+                foreach (var pair in RamsAwaitingSave)
+                {
+                    Main.ActiveProject.AddNewRam(pair.Key, pair.Value);
+                }
                 saved = true;
                 PinBitCountsAwaitingSave = new();
                 MergeSplitsAwaitingSave = new();
                 RomsAwaitingSave = new();
+                RamsAwaitingSave = new();
             }
         }
 

@@ -57,6 +57,9 @@ namespace DLS.Description
 		// Custom ROM sizes: Key = address bits, Value = data bits
 		public List<KeyValuePair<int, int>> CustomRomSizes;
 
+		// Custom RAM sizes: Key = address bits, Value = data bits
+		public List<KeyValuePair<int, int>> CustomRamSizes;
+
 		public List<CustomDisplaySettings> CustomDisplays;
 
 		[Serializable]
